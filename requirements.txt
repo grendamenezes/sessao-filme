@@ -2,4 +2,3 @@ dash==2.8.1
 gunicorn
 pandas
 dash-tools
-json
