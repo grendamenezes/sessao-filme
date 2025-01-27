@@ -1,5 +1,6 @@
 import json
 import random
+import sqlite3
 from dash import Dash, dcc, html, Input, Output, State, ctx, ALL
 import dash
 
@@ -9,23 +10,49 @@ server = app.server
 app.title = "Filmin"
 app.config.suppress_callback_exceptions = True
 
-# Caminho do arquivo JSON para armazenar os dados
-DATA_FILE = "titles_data.json"
+# Nome do arquivo do banco de dados
+DB_FILE = "titles_data.db"
 
-# Funções para salvar e carregar dados
-def load_data():
-    try:
-        with open(DATA_FILE, "r") as file:
-            return json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"Documentário": [], "Filme": [], "Série": []}
+# Funções para gerenciar o banco de dados
+def create_table():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS titles (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        category TEXT NOT NULL,
+                        title TEXT NOT NULL)''')
+    conn.commit()
+    conn.close()
 
-def save_data(data):
-    with open(DATA_FILE, "w") as file:
-        json.dump(data, file, indent=4)
+def save_title(category, title):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO titles (category, title) VALUES (?, ?)", (category, title))
+    conn.commit()
+    conn.close()
 
-# Carregar os dados armazenados no arquivo JSON
-titles_memory = load_data()
+def remove_title(title_id):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM titles WHERE id = ?", (title_id,))
+    conn.commit()
+    conn.close()
+
+def load_titles():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, category, title FROM titles")
+    rows = cursor.fetchall()
+    conn.close()
+
+    data = {"Documentário": [], "Filme": [], "Série": []}
+    for row in rows:
+        title_id, category, title = row
+        data[category].append((title_id, title))
+    return data
+
+# Criar a tabela no banco de dados
+create_table()
 
 # Layout da aplicação (mantém o seu layout original)
 app.layout = html.Div([
@@ -78,7 +105,7 @@ app.layout = html.Div([
     [Input("add-button", "n_clicks"),
      Input("draw-button", "n_clicks"),
      Input("category-dropdown", "value"),
-     Input({"type": "remove-button", "index": ALL, "category": ALL}, "n_clicks")],
+     Input({"type": "remove-button", "index": ALL}, "n_clicks")],
     [State("title-input", "value")]
 )
 def manage_titles(add_clicks, draw_clicks, category, remove_clicks, title):
@@ -86,15 +113,14 @@ def manage_titles(add_clicks, draw_clicks, category, remove_clicks, title):
 
     # Adicionar título
     if triggered_id == "add-button" and category and title:
-        titles_memory[category].append(title.strip())
-        save_data(titles_memory)
+        save_title(category, title.strip())
 
     # Remover título
     if isinstance(triggered_id, dict) and triggered_id.get("type") == "remove-button":
-        cat = triggered_id["category"]
-        index = triggered_id["index"]
-        titles_memory[cat].pop(index)
-        save_data(titles_memory)
+        remove_title(triggered_id["index"])
+
+    # Carregar títulos
+    titles_memory = load_titles()
 
     # Atualizar exibição dos títulos
     displayed_titles = []
@@ -103,10 +129,10 @@ def manage_titles(add_clicks, draw_clicks, category, remove_clicks, title):
         displayed_titles.append(
             html.Ul([
                 html.Li([
-                    t,
-                    html.Button("Remover", id={"type": "remove-button", "index": i, "category": category},
+                    t[1],  # O título em si
+                    html.Button("Remover", id={"type": "remove-button", "index": t[0]},
                                 n_clicks=0, style={"color": "red", "marginLeft": "10px"})
-                ]) for i, t in enumerate(titles_memory[category])
+                ]) for t in titles_memory[category]
             ])
         )
 
@@ -126,14 +152,13 @@ def manage_titles(add_clicks, draw_clicks, category, remove_clicks, title):
     random_title = ""
     if triggered_id == "draw-button":
         if category and titles_memory[category]:
-            random_title = f"E o escolhido do dia foi: {random.choice(titles_memory[category])}"
+            random_title = f"E o escolhido do dia foi: {random.choice(titles_memory[category])[1]}"
         else:
             random_title = "Nenhum título disponível para a categoria selecionada."
 
     clear_input = "" if triggered_id == "add-button" else dash.no_update
 
     return container, random_title, clear_input
-
 
 # Rodar o aplicativo
 if __name__ == "__main__":
